@@ -144,6 +144,7 @@ const DEFAULTS = {
   text_color_mode: 'auto',
   label_size: 15,
   date_size: 13,
+  countdown_size: 12,
   border_mode: 'none',
   border_width: 1,
   radius: 14,
@@ -533,6 +534,7 @@ const layoutVars = (cfg) => {
     '--tcp-isize': `${cfg.icon_size ?? (cfg.layout === 'icons' ? 40 : DEFAULTS.icon_size)}px`,
     '--tcp-lsize': `${cfg.label_size ?? DEFAULTS.label_size}px`,
     '--tcp-dsize': `${cfg.date_size ?? DEFAULTS.date_size}px`,
+    '--tcp-cdsize': `${cfg.countdown_size ?? DEFAULTS.countdown_size}px`,
     '--tcp-radius': `${cfg.radius ?? DEFAULTS.radius}px`,
     '--tcp-pad': `${cfg.padding ?? DEFAULTS.padding}px`,
     '--tcp-gap': `${cfg.gap ?? DEFAULTS.gap}px`,
@@ -572,7 +574,7 @@ const CARD_CSS = `
   .info { min-width:0; flex:1; display:flex; flex-direction:column; gap:2px; }
   .label { font-size: var(--tcp-lsize); font-weight:600; line-height:1.25; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .date { font-size: var(--tcp-dsize); color: var(--tcp-text2); line-height:1.3; }
-  .badge { flex:0 0 auto; font-size: max(11px, calc(var(--tcp-dsize) - 1px)); font-weight:600; padding:3px 9px; border-radius:999px;
+  .badge { flex:0 0 auto; font-size: var(--tcp-cdsize); font-weight:600; padding:0.25em 0.75em; border-radius:999px;
     background: var(--tcp-badge-bg); color: var(--tcp-badge-text); white-space:nowrap; line-height:1.4; }
 
   .lay-tiles.item { display:flex; align-items:center; gap:12px; padding: var(--tcp-pad); }
@@ -581,7 +583,7 @@ const CARD_CSS = `
   .lay-tiles.o-vertical .label { max-width:100%; }
   .meta { display:flex; flex-wrap:wrap; align-items:center; gap:4px 8px; }
   .lay-tiles.o-vertical .meta { justify-content:center; }
-  .meta .badge { padding:2px 8px; }
+  .meta .badge { padding:0.17em 0.65em; }
 
   .lay-list.item { display:flex; align-items:center; gap:12px; padding: calc(var(--tcp-pad) * .7) var(--tcp-pad); }
   .lay-list .info { flex-direction:row; align-items:center; justify-content:space-between; gap:10px; }
@@ -591,7 +593,7 @@ const CARD_CSS = `
   .lay-chips .icon { width: calc(var(--tcp-isize) * 1.35); height: calc(var(--tcp-isize) * 1.35); --mdc-icon-size: calc(var(--tcp-isize) * .8); }
   .lay-chips .txt { display:flex; gap:6px; align-items:baseline; font-size: var(--tcp-dsize); white-space:nowrap; }
   .lay-chips .txt b { font-size: var(--tcp-dsize); }
-  .lay-chips .badge { padding:2px 8px; }
+  .lay-chips .badge { padding:0.17em 0.65em; }
 
   .lay-icons.item { display:flex; flex-direction:column; align-items:center; gap:6px; padding: var(--tcp-pad) 4px; text-align:center; }
   .lay-icons .label { font-size: var(--tcp-dsize); max-width:100%; }
@@ -839,7 +841,7 @@ const EDITOR_STRINGS = {
       blur: 'Unschärfe dahinter (Glas-Effekt)', icon_color_mode: 'Symbolfarbe', icon_color: 'Eigene Symbolfarbe',
       icon_bg_mode: 'Symbol-Hintergrund', icon_bg_color: 'Eigene Farbe Symbol-Hintergrund', icon_bg_opacity: 'Deckkraft Symbol-Hintergrund',
       icon_shape: 'Form Symbol-Hintergrund', icon_size: 'Symbolgröße', text_color_mode: 'Textfarbe', text_color: 'Eigene Textfarbe',
-      label_size: 'Schriftgröße Bezeichnung', date_size: 'Schriftgröße Datum', border_mode: 'Rahmen', border_color: 'Rahmenfarbe',
+      label_size: 'Schriftgröße Bezeichnung', date_size: 'Schriftgröße Datum', countdown_size: 'Größe Countdown-Badge', border_mode: 'Rahmen', border_color: 'Rahmenfarbe',
       border_width: 'Rahmenstärke', radius: 'Eckenradius', shadow: 'Schatten', padding: 'Innenabstand', gap: 'Abstand zwischen Einträgen',
       highlight: 'Hervorhebung', highlight_days: 'Hervorheben', future_opacity: 'Deckkraft späterer Termine',
       label: 'Bezeichnung', pattern: 'Suchbegriffe im Kalendertitel', pattern_exact: 'Titel muss exakt übereinstimmen',
@@ -922,7 +924,7 @@ const EDITOR_STRINGS = {
       blur: 'Blur behind (glass effect)', icon_color_mode: 'Icon color', icon_color: 'Custom icon color',
       icon_bg_mode: 'Icon background', icon_bg_color: 'Custom icon background color', icon_bg_opacity: 'Icon background opacity',
       icon_shape: 'Icon background shape', icon_size: 'Icon size', text_color_mode: 'Text color', text_color: 'Custom text color',
-      label_size: 'Label font size', date_size: 'Date font size', border_mode: 'Border', border_color: 'Border color',
+      label_size: 'Label font size', date_size: 'Date font size', countdown_size: 'Countdown badge size', border_mode: 'Border', border_color: 'Border color',
       border_width: 'Border width', radius: 'Corner radius', shadow: 'Shadow', padding: 'Padding', gap: 'Gap between entries',
       highlight: 'Highlight', highlight_days: 'Highlight', future_opacity: 'Opacity of later dates',
       label: 'Label', pattern: 'Search terms in calendar title', pattern_exact: 'Title must match exactly',
@@ -1248,6 +1250,7 @@ class TrashCardPlusEditor extends HTMLElement {
         ...(v('text_color_mode') === 'custom' ? [{ name: 'text_color', selector: { color_rgb: {} } }] : []),
         { name: 'label_size', selector: this._num(9, 32, 1, 'px') },
         { name: 'date_size', selector: this._num(8, 28, 1, 'px') },
+        ...(v('layout') === 'icons' || v('countdown') === 'badge' ? [{ name: 'countdown_size', selector: this._num(8, 28, 1, 'px') }] : []),
       ]),
       this._group('frame', 'mdi:rounded-corner', [
         { name: 'border_mode', selector: this._opts('border_mode', ['none', 'accent', 'theme', 'custom']) },
