@@ -1,0 +1,10 @@
+Abfall-Karte (Trash Card Plus)
+Copyright 2026 Felix Kohlmann (Kohle93)
+
+This product is a derivative work of "TrashCard"
+(https://github.com/idaho/hassio-trash-card), Copyright Florian Triebel,
+licensed under the Apache License, Version 2.0.
+
+Changes: The calendar handling logic was ported from TypeScript to a single
+JavaScript file. Rendering, styling options, date formatting and the visual
+editor were rewritten.
