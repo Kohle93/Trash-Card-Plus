@@ -7,7 +7,7 @@
  * Kalender-Logik übernommen, Darstellung und Editor neu geschrieben.
  */
 
-const CARD_VERSION = '1.2.0';
+const CARD_VERSION = '1.2.1';
 const CARD_TYPE = 'trash-card-plus';
 const EDITOR_TYPE = 'trash-card-plus-editor';
 
@@ -973,7 +973,7 @@ const EDITOR_STRINGS = {
       calendar: 'Which calendar contains the collection dates and which period should be shown?',
       display: 'Basic layout of the card. Colors and transparency are in the “Design” tab.',
       date: 'Simply pick how the date should look – the preview updates instantly.',
-      design: 'At the top the surrounding card (background, opacity, border – same as EV Charge Card, Power Flow card and Status Summary), below the default design for all waste types. Each waste type can override it in the “Waste types” tab.',
+      design: 'At the top the surrounding card (background, opacity, border – same as EV Charge Card, Radial Flow Card and Status Summary Card), below the default design for all waste types. Each waste type can override it in the “Waste types” tab.',
       items: 'Each waste type has its own icon, color and optionally a completely individual design.',
     },
     groups: {
@@ -1767,8 +1767,8 @@ window.customCards = window.customCards || [];
 if (!window.customCards.some((c) => c.type === CARD_TYPE)) {
   window.customCards.push({
     type: CARD_TYPE,
-    name: 'Abfall-Karte (Trash Card Plus)',
-    description: 'Zeigt die nächsten Müllabfuhr-Termine aus deinem Kalender – jede Abfallart individuell gestaltbar, mit einfachem Datumsformat.',
+    name: 'Trash Card Plus',
+    description: 'Shows the next waste collection dates from your calendar – every waste type with its own design, with a simple date format.',
     preview: true,
     documentationURL: 'https://github.com/Kohle93/Trash-Card-Plus',
   });
