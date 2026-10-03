@@ -7,7 +7,7 @@
  * Kalender-Logik übernommen, Darstellung und Editor neu geschrieben.
  */
 
-const CARD_VERSION = '1.0.0';
+const CARD_VERSION = '1.2.0';
 const CARD_TYPE = 'trash-card-plus';
 const EDITOR_TYPE = 'trash-card-plus-editor';
 
@@ -121,8 +121,16 @@ const DEFAULTS = {
   alignment: 'left',
   show_label: true,
   container: 'none',
-  container_bg_mode: 'theme',
-  container_bg_opacity: 100,
+  // Umgebende Karte (gleicher Standard wie EV Charge Card, Power-Flow-Karte
+  // und Status-Übersicht: card_bg_* / card_border_* / card_shadow / card_radius)
+  card_bg_mode: 'theme',
+  card_bg_opacity: 100,
+  card_bg_gradient: false,
+  card_blur: 0,
+  card_border_mode: 'theme',
+  card_border_width: 1,
+  card_shadow: 'theme',
+  card_radius: 12,
   date_format: 'smart',
   relative_words: 'today_tomorrow',
   countdown: 'badge',
@@ -163,6 +171,11 @@ const ITEM_STYLE_KEYS = [
   'border_mode', 'border_color', 'border_width', 'shadow', 'highlight',
 ];
 
+const CONTAINER_ALIASES = {
+  container_bg_mode: 'card_bg_mode', container_bg_color: 'card_bg_color',
+  container_bg_opacity: 'card_bg_opacity', container_blur: 'card_blur',
+};
+
 const LEGACY_TYPE_LABELS = { organic: 'Biomüll', paper: 'Papier', recycle: 'Gelber Sack', waste: 'Restmüll', others: 'Sonstiges' };
 
 // Übernimmt Konfigurationen der Original-TrashCard, damit YAML weiterverwendet werden kann.
@@ -199,6 +212,13 @@ const migrateConfig = (config) => {
     if (cfg.hide_time_range) cfg.show_time = false;
     ['items_per_row', 'card_style', 'day_style', 'day_style_format', 'color_mode', 'with_label', 'alignment_style', 'hide_time_range', 'full_size', 'fill_container', 'debug'].forEach((k) => delete cfg[k]);
   }
+  // Bis v1.1: container_bg_* -> einheitliche Schlüssel card_bg_* (wie EV Charge
+  // Card, Power-Flow-Karte und Status-Übersicht). Alte YAML funktioniert weiter.
+  Object.entries(CONTAINER_ALIASES).forEach(([from, to]) => {
+    if (cfg[from] === undefined) return;
+    if (cfg[to] === undefined) cfg[to] = cfg[from];
+    delete cfg[from];
+  });
   return cfg;
 };
 
@@ -544,10 +564,73 @@ const layoutVars = (cfg) => {
   return v;
 };
 
+// Hintergrund nach Modus: theme | tinted | accent | custom | none – exakt dieselbe
+// Formel wie in EV Charge Card, Power-Flow-Karte und Status-Übersicht.
+const bgValue = ({ mode, opacity, gradient, color }, accent, base) => {
+  const op = Number(opacity);
+  if (mode === 'none') return 'transparent';
+  if (mode === 'theme') return withAlpha(THEME_BG, op);
+  if (mode === 'tinted') {
+    const tint = gradient
+      ? `linear-gradient(135deg, ${withAlpha(accent.css, op)} 0%, ${withAlpha(accent.css, Math.round(op * 0.15))} 100%)`
+      : `linear-gradient(${withAlpha(accent.css, op)}, ${withAlpha(accent.css, op)})`;
+    return base ? `${tint}, ${base}` : tint;
+  }
+  const info = mode === 'custom' ? (colorInfo(color) || colorInfo([255, 255, 255])) : accent;
+  return gradient
+    ? `linear-gradient(135deg, ${withAlpha(info.css, op)} 0%, ${withAlpha(`color-mix(in srgb, ${info.css} 62%, black)`, op)} 100%)`
+    : withAlpha(info.css, op);
+};
+
+const has = (v) => v !== undefined && v !== null && v !== '';
+
+// Umgebende Karte (ha-card): Hintergrund, Deckkraft, Glas-Effekt, Rahmen,
+// Schatten, Eckenradius und Innenabstand. „theme“ lässt das Theme unangetastet.
+const cardDesign = (cfg) => {
+  const v = (k) => (has(cfg[k]) ? cfg[k] : DEFAULTS[k]);
+  const accent = colorInfo(cfg.accent_color) || colorInfo('primary');
+  const vars = {};
+  const mode = v('card_bg_mode');
+  const op = Number(v('card_bg_opacity'));
+  const blur = Number(v('card_blur')) || 0;
+  const customBg = !(mode === 'theme' && op >= 100) || blur > 0;
+  if (customBg) {
+    vars['--tcp-cbg'] = bgValue({ mode, opacity: op, gradient: v('card_bg_gradient'), color: cfg.card_bg_color }, accent, THEME_BG);
+    if (blur > 0) vars['--tcp-cbf'] = `blur(${blur}px)`;
+  }
+  const bm = v('card_border_mode');
+  if (bm === 'none') vars.border = 'none';
+  else if (bm === 'accent' || bm === 'custom') {
+    const bc = bm === 'custom' ? (colorInfo(cfg.card_border_color) || accent) : accent;
+    vars.border = `${Number(v('card_border_width')) || 1}px solid ${bc.css}`;
+  }
+  const sh = v('card_shadow');
+  if (sh !== 'theme') vars['box-shadow'] = SHADOWS[sh] || 'none';
+  if (has(cfg.card_radius)) vars['border-radius'] = `${Number(cfg.card_radius)}px`;
+  if (has(cfg.card_padding)) vars['--tcp-cpad'] = `${Number(cfg.card_padding)}px`;
+  return { vars, customBg };
+};
+
+// Komplettes HTML der Karte (auch für die Vorschau im Editor)
+const wrapHtml = (cfg, inner) => {
+  const boxed = (cfg.container || DEFAULTS.container) === 'card';
+  const lv = layoutVars(cfg);
+  let wrapClass = 'wrap';
+  if (boxed) {
+    wrapClass += ' boxed';
+    const { vars, customBg } = cardDesign(cfg);
+    if (customBg) wrapClass += ' custom-bg';
+    Object.assign(lv, vars);
+  }
+  const title = cfg.title ? `<div class="title">${cfg.title_icon ? `<ha-icon icon="${esc(cfg.title_icon)}"></ha-icon>` : ''}<span>${esc(cfg.title)}</span></div>` : '';
+  const tag = boxed ? 'ha-card' : 'div';
+  return `<${tag} class="${wrapClass}" style="${esc(styleString(lv))}">${title}${inner}</${tag}>`;
+};
+
 const CARD_CSS = `
   :host { display:block; }
   .wrap { box-sizing:border-box; }
-  .wrap.boxed { padding: var(--tcp-pad); border-radius: var(--ha-card-border-radius, 12px); }
+  .wrap.boxed { padding: var(--tcp-cpad, var(--tcp-pad)); border-radius: var(--ha-card-border-radius, 12px); }
   ha-card.wrap.boxed { overflow:hidden; }
   .wrap.boxed.custom-bg { background: transparent !important; position: relative; isolation: isolate; }
   .wrap.boxed.custom-bg::before { content: ''; position: absolute; inset: 0; z-index: -1; border-radius: inherit;
@@ -758,24 +841,7 @@ class TrashCardPlus extends HTMLElement {
     }
     this._setVisible(true);
 
-    const boxed = (cfg.container || DEFAULTS.container) === 'card';
-    const lv = layoutVars(cfg);
-    let wrapClass = 'wrap';
-    if (boxed) {
-      wrapClass += ' boxed';
-      const mode = cfg.container_bg_mode || DEFAULTS.container_bg_mode;
-      const op = cfg.container_bg_opacity ?? DEFAULTS.container_bg_opacity;
-      if (mode !== 'theme' || op < 100 || cfg.container_blur) {
-        wrapClass += ' custom-bg';
-        lv['--tcp-cbg'] = mode === 'none' ? 'transparent'
-          : mode === 'custom' ? withAlpha((colorInfo(cfg.container_bg_color) || colorInfo([255, 255, 255])).css, op)
-            : withAlpha(THEME_BG, op);
-        if (Number(cfg.container_blur) > 0) lv['--tcp-cbf'] = `blur(${cfg.container_blur}px)`;
-      }
-    }
-    const title = cfg.title ? `<div class="title">${cfg.title_icon ? `<ha-icon icon="${esc(cfg.title_icon)}"></ha-icon>` : ''}<span>${esc(cfg.title)}</span></div>` : '';
-    const tag = boxed ? 'ha-card' : 'div';
-    this.shadowRoot.innerHTML = `<style>${CARD_CSS}</style><${tag} class="${wrapClass}" style="${esc(styleString(lv))}">${title}${content}</${tag}>`;
+    this.shadowRoot.innerHTML = `<style>${CARD_CSS}</style>${wrapHtml(cfg, content)}`;
   }
 
   _onClick(ev) {
@@ -815,12 +881,13 @@ const EDITOR_STRINGS = {
       calendar: 'Aus welchem Kalender kommen die Abholtermine und welcher Zeitraum wird angezeigt?',
       display: 'Grundlayout der Karte. Farben und Transparenz findest du im Tab „Design“.',
       date: 'Wähle einfach, wie das Datum aussehen soll – die Vorschau zeigt sofort das Ergebnis.',
-      design: 'Standard-Design für alle Abfallarten. Jede Abfallart kann das im Tab „Abfallarten“ individuell überschreiben.',
+      design: 'Oben die umgebende Karte (Hintergrund, Deckkraft, Rahmen – genau wie bei EV Charge Card, Power-Flow-Karte und Status-Übersicht), darunter das Standard-Design für alle Abfallarten. Jede Abfallart kann das im Tab „Abfallarten“ individuell überschreiben.',
       items: 'Jede Abfallart hat ihr eigenes Symbol, ihre eigene Farbe und optional ein komplett eigenes Design.',
     },
     groups: {
-      bg: 'Hintergrund & Transparenz', icon: 'Symbol', text: 'Text', frame: 'Rahmen, Form & Abstände',
-      highlight: 'Hervorhebung (heute / morgen)', container: 'Umgebende Karte & Titel', layout: 'Layout',
+      card_bg: 'Karte – Hintergrund & Transparenz', card_frame: 'Karte – Rahmen, Form & Abstände',
+      bg: 'Abfallarten – Hintergrund & Transparenz', icon: 'Symbol', text: 'Text', frame: 'Abfallarten – Rahmen, Form & Abstände',
+      highlight: 'Hervorhebung (heute / morgen)', title: 'Titel', layout: 'Layout',
       recognition: 'Erkennung im Kalender', look: 'Symbol & Farbe', item_bg: 'Hintergrund', item_text: 'Text & Rahmen',
       behaviour: 'Verhalten', period: 'Zeitraum', filter: 'Filter', custom_format: 'Eigenes Format',
     },
@@ -832,9 +899,12 @@ const EDITOR_STRINGS = {
       hide_when_empty: 'Karte ausblenden, wenn keine Termine', empty_text: 'Text, wenn keine Termine',
       layout: 'Darstellung', orientation: 'Anordnung', columns: 'Spalten', alignment: 'Ausrichtung',
       show_label: 'Bezeichnung anzeigen', use_summary: 'Kalendertitel statt Bezeichnung verwenden',
-      container: 'Rahmen', title: 'Titel (optional)', title_icon: 'Titel-Symbol',
-      container_bg_mode: 'Hintergrund der Karte', container_bg_color: 'Farbe der Karte', container_bg_opacity: 'Deckkraft der Karte',
-      container_blur: 'Unschärfe hinter der Karte (Glas-Effekt)', tap_action: 'Aktion beim Antippen',
+      container: 'Umgebende Karte', title: 'Titel (optional)', title_icon: 'Titel-Symbol', tap_action: 'Aktion beim Antippen',
+      accent_color: 'Akzentfarbe',
+      card_bg_mode: 'Hintergrund der Karte', card_bg_color: 'Farbe der Karte', card_bg_opacity: 'Deckkraft der Karte',
+      card_bg_gradient: 'Farbverlauf', card_blur: 'Unschärfe hinter der Karte (Glas-Effekt)',
+      card_border_mode: 'Rahmen der Karte', card_border_color: 'Rahmenfarbe der Karte', card_border_width: 'Rahmenstärke der Karte',
+      card_shadow: 'Schatten der Karte', card_radius: 'Eckenradius der Karte', card_padding: 'Innenabstand der Karte',
       date_format: 'Datumsformat', df_weekday: 'Wochentag', df_day: 'Tag', df_month: 'Monat', df_year: 'Jahr',
       relative_words: '„Heute“ / „Morgen“ statt Datum', countdown: 'Countdown („in 3 Tagen“)', show_time: 'Uhrzeit bei Terminen mit Uhrzeit',
       bg_mode: 'Hintergrund', bg_color: 'Hintergrundfarbe', bg_opacity: 'Deckkraft / Farbstärke', bg_gradient: 'Farbverlauf',
@@ -856,13 +926,18 @@ const EDITOR_STRINGS = {
       fallback: 'Termine, die zu keiner anderen Abfallart passen, bekommen dieses Aussehen.',
       bg_opacity: 'Bei „Theme + Farbton“ ist das die Stärke des Farbtons.',
       future_opacity: 'Termine, die nicht hervorgehoben sind, werden blasser dargestellt.',
+      container: 'Nur mit umgebender Karte gibt es Karten-Hintergrund, -Deckkraft, -Rahmen und -Schatten.',
+      accent_color: 'Farbe für „Theme + Farbton“, „Volle Akzentfarbe“ und den Akzent-Rahmen der Karte. Leer = Akzentfarbe des Themes. Jede Abfallart hat zusätzlich ihre eigene Farbe.',
+      card_bg_opacity: '0 % = durchsichtig, 100 % = deckend. Bei „Theme + Farbton“ ist das die Stärke des Farbtons.',
+      card_blur: 'Der Hintergrund hinter der Karte wird unscharf durchscheinend – wie Milchglas.',
     },
     opt: {
       layout: { tiles: 'Kacheln', list: 'Liste', chips: 'Chips (kompakt)', icons: 'Symbole mit Countdown' },
       orientation: { horizontal: 'Symbol links, Text rechts', vertical: 'Symbol oben, Text darunter' },
       alignment: { left: 'Links', center: 'Mittig', right: 'Rechts', space: 'Verteilt' },
-      container: { none: 'Einzelne Einträge (ohne umgebende Karte)', card: 'In einer Karte zusammengefasst' },
-      container_bg_mode: { theme: 'Theme-Hintergrund', custom: 'Eigene Farbe', none: 'Transparent' },
+      container: { none: 'Keine – einzelne Einträge', card: 'Alle Einträge in einer Karte' },
+      card_bg_mode: { theme: 'Theme-Hintergrund', tinted: 'Theme + Farbton', accent: 'Volle Akzentfarbe', custom: 'Eigene Farbe', none: 'Transparent (kein Hintergrund)' },
+      card_border_mode: { theme: 'Wie Theme', none: 'Kein Rahmen', accent: 'Akzentfarbe', custom: 'Eigene Farbe' },
       relative_words: { none: 'Aus – immer das Format oben', today_tomorrow: 'Heute / Morgen', all: 'Heute / Morgen / Übermorgen' },
       countdown: { none: 'Nicht anzeigen', badge: 'Als Badge rechts', line: 'Als eigene Zeile' },
       df_weekday: { none: 'Kein Wochentag' }, df_month: { none: 'Kein Monat' }, df_year: { none: 'Kein Jahr' },
@@ -898,12 +973,13 @@ const EDITOR_STRINGS = {
       calendar: 'Which calendar contains the collection dates and which period should be shown?',
       display: 'Basic layout of the card. Colors and transparency are in the “Design” tab.',
       date: 'Simply pick how the date should look – the preview updates instantly.',
-      design: 'Default design for all waste types. Each waste type can override it in the “Waste types” tab.',
+      design: 'At the top the surrounding card (background, opacity, border – same as EV Charge Card, Power Flow card and Status Summary), below the default design for all waste types. Each waste type can override it in the “Waste types” tab.',
       items: 'Each waste type has its own icon, color and optionally a completely individual design.',
     },
     groups: {
-      bg: 'Background & transparency', icon: 'Icon', text: 'Text', frame: 'Border, shape & spacing',
-      highlight: 'Highlight (today / tomorrow)', container: 'Surrounding card & title', layout: 'Layout',
+      card_bg: 'Card – background & transparency', card_frame: 'Card – border, shape & spacing',
+      bg: 'Waste types – background & transparency', icon: 'Icon', text: 'Text', frame: 'Waste types – border, shape & spacing',
+      highlight: 'Highlight (today / tomorrow)', title: 'Title', layout: 'Layout',
       recognition: 'Calendar matching', look: 'Icon & color', item_bg: 'Background', item_text: 'Text & border',
       behaviour: 'Behaviour', period: 'Period', filter: 'Filter', custom_format: 'Custom format',
     },
@@ -915,9 +991,12 @@ const EDITOR_STRINGS = {
       hide_when_empty: 'Hide card when there are no dates', empty_text: 'Text when there are no dates',
       layout: 'Style', orientation: 'Arrangement', columns: 'Columns', alignment: 'Alignment',
       show_label: 'Show label', use_summary: 'Use calendar title instead of label',
-      container: 'Frame', title: 'Title (optional)', title_icon: 'Title icon',
-      container_bg_mode: 'Card background', container_bg_color: 'Card color', container_bg_opacity: 'Card opacity',
-      container_blur: 'Blur behind card (glass effect)', tap_action: 'Tap action',
+      container: 'Surrounding card', title: 'Title (optional)', title_icon: 'Title icon', tap_action: 'Tap action',
+      accent_color: 'Accent color',
+      card_bg_mode: 'Card background', card_bg_color: 'Card color', card_bg_opacity: 'Card opacity',
+      card_bg_gradient: 'Gradient', card_blur: 'Blur behind card (glass effect)',
+      card_border_mode: 'Card border', card_border_color: 'Card border color', card_border_width: 'Card border width',
+      card_shadow: 'Card shadow', card_radius: 'Card corner radius', card_padding: 'Card padding',
       date_format: 'Date format', df_weekday: 'Weekday', df_day: 'Day', df_month: 'Month', df_year: 'Year',
       relative_words: '“Today” / “Tomorrow” instead of date', countdown: 'Countdown (“in 3 days”)', show_time: 'Time for events with a time',
       bg_mode: 'Background', bg_color: 'Background color', bg_opacity: 'Opacity / tint strength', bg_gradient: 'Gradient',
@@ -939,13 +1018,18 @@ const EDITOR_STRINGS = {
       fallback: 'Events that match no other waste type get this look.',
       bg_opacity: 'For “Theme + tint” this is the strength of the tint.',
       future_opacity: 'Entries that are not highlighted are shown more faintly.',
+      container: 'Card background, opacity, border and shadow only exist with a surrounding card.',
+      accent_color: 'Color for “Theme + tint”, “Full accent color” and the accent border of the card. Empty = theme accent color. Each waste type also has its own color.',
+      card_bg_opacity: '0 % = see-through, 100 % = opaque. For “Theme + tint” this is the strength of the tint.',
+      card_blur: 'The background behind the card is blurred – like frosted glass.',
     },
     opt: {
       layout: { tiles: 'Tiles', list: 'List', chips: 'Chips (compact)', icons: 'Icons with countdown' },
       orientation: { horizontal: 'Icon left, text right', vertical: 'Icon on top, text below' },
       alignment: { left: 'Left', center: 'Center', right: 'Right', space: 'Spread' },
-      container: { none: 'Separate entries (no surrounding card)', card: 'Grouped in one card' },
-      container_bg_mode: { theme: 'Theme background', custom: 'Custom color', none: 'Transparent' },
+      container: { none: 'None – separate entries', card: 'All entries in one card' },
+      card_bg_mode: { theme: 'Theme background', tinted: 'Theme + tint', accent: 'Full accent color', custom: 'Custom color', none: 'Transparent (no background)' },
+      card_border_mode: { theme: 'Like theme', none: 'No border', accent: 'Accent color', custom: 'Custom color' },
       relative_words: { none: 'Off – always the format above', today_tomorrow: 'Today / Tomorrow', all: 'Today / Tomorrow / Day after' },
       countdown: { none: 'Hidden', badge: 'As badge on the right', line: 'As separate line' },
       df_weekday: { none: 'No weekday' }, df_month: { none: 'No month' }, df_year: { none: 'No year' },
@@ -1146,20 +1230,12 @@ class TrashCardPlusEditor extends HTMLElement {
       { name: 'show_label', selector: { boolean: {} } },
       { name: 'use_summary', selector: { boolean: {} } },
     ] });
-    const cont = this._val('container');
-    const bgMode = this._val('container_bg_mode');
-    s.push(this._group('container', 'mdi:card-outline', [
-      { name: 'container', selector: this._opts('container', ['none', 'card']) },
+    // Umgebende Karte samt Hintergrund/Deckkraft/Rahmen liegt im Tab „Design“
+    s.push(this._group('title', 'mdi:format-title', [
       { type: 'grid', name: '', schema: [
         { name: 'title', selector: { text: {} } },
         { name: 'title_icon', selector: { icon: {} } },
       ] },
-      ...(cont === 'card' ? [
-        { name: 'container_bg_mode', selector: this._opts('container_bg_mode', ['theme', 'custom', 'none']) },
-        ...(bgMode === 'custom' ? [{ name: 'container_bg_color', selector: { color_rgb: {} } }] : []),
-        ...(bgMode !== 'none' ? [{ name: 'container_bg_opacity', selector: this._num(0, 100, 5, '%') }] : []),
-        { name: 'container_blur', selector: this._num(0, 30, 1, 'px') },
-      ] : []),
     ], true));
     s.push({ name: 'tap_action', selector: { ui_action: {} } });
     return s;
@@ -1224,7 +1300,30 @@ class TrashCardPlusEditor extends HTMLElement {
 
   _schemaDesign() {
     const v = (k) => this._val(k);
+    const tintable = (k) => ['tinted', 'accent', 'custom'].includes(v(k));
+    const boxed = v('container') === 'card';
+    // Karten-Ebene: identisch mit EV Charge Card, Power-Flow-Karte und Status-Übersicht
+    const card = boxed ? [
+      { name: 'accent_color', selector: { color_rgb: {} } },
+      this._group('card_bg', 'mdi:card-outline', [
+        { name: 'card_bg_mode', selector: this._opts('card_bg_mode', ['theme', 'tinted', 'accent', 'custom', 'none']) },
+        ...(v('card_bg_mode') === 'custom' ? [{ name: 'card_bg_color', selector: { color_rgb: {} } }] : []),
+        ...(v('card_bg_mode') !== 'none' ? [{ name: 'card_bg_opacity', selector: this._num(0, 100, 1, '%') }] : []),
+        ...(tintable('card_bg_mode') ? [{ name: 'card_bg_gradient', selector: { boolean: {} } }] : []),
+        { name: 'card_blur', selector: this._num(0, 30, 1, 'px') },
+      ], true),
+      this._group('card_frame', 'mdi:square-rounded-outline', [
+        { name: 'card_border_mode', selector: this._opts('card_border_mode', ['theme', 'none', 'accent', 'custom']) },
+        ...(v('card_border_mode') === 'custom' ? [{ name: 'card_border_color', selector: { color_rgb: {} } }] : []),
+        ...(['accent', 'custom'].includes(v('card_border_mode')) ? [{ name: 'card_border_width', selector: this._num(1, 6, 1, 'px') }] : []),
+        { name: 'card_shadow', selector: this._opts('shadow', ['theme', 'none', 'soft', 'strong']) },
+        { name: 'card_radius', selector: this._num(0, 40, 1, 'px') },
+        { name: 'card_padding', selector: this._num(0, 40, 1, 'px') },
+      ]),
+    ] : [];
     return [
+      { name: 'container', selector: this._opts('container', ['none', 'card']) },
+      ...card,
       this._group('bg', 'mdi:format-color-fill', [
         { name: 'bg_mode', selector: this._opts('bg_mode', ['theme', 'tinted', 'accent', 'custom', 'none']) },
         ...(v('bg_mode') === 'custom' ? [{ name: 'bg_color', selector: { color_rgb: {} } }] : []),
@@ -1258,7 +1357,7 @@ class TrashCardPlusEditor extends HTMLElement {
         ...(v('border_mode') !== 'none' ? [{ name: 'border_width', selector: this._num(1, 6, 1, 'px') }] : []),
         { name: 'shadow', selector: this._opts('shadow', ['theme', 'none', 'soft', 'strong']) },
         { name: 'radius', selector: this._num(0, 40, 1, 'px') },
-        { name: 'padding', selector: this._num(2, 32, 1, 'px') },
+        { name: 'padding', selector: this._num(0, 40, 1, 'px') },
         { name: 'gap', selector: this._num(0, 32, 1, 'px') },
       ]),
       this._group('highlight', 'mdi:star-four-points-outline', [
@@ -1331,6 +1430,7 @@ class TrashCardPlusEditor extends HTMLElement {
     Object.keys(DEFAULTS).forEach((k) => { if (d[k] === undefined) d[k] = this._val(k); });
     d.highlight_days = String(d.highlight_days);
     if (d.max_items === undefined) d.max_items = 0;
+    if (!has(d.card_padding)) d.card_padding = Number(this._val('padding'));
     return d;
   }
 
@@ -1415,6 +1515,11 @@ class TrashCardPlusEditor extends HTMLElement {
       this._dp.className = 'dp';
       pane.appendChild(this._dp);
     }
+    if (this._tab === 'design') {
+      this._pv = document.createElement('div');
+      this._pv.className = 'pv';
+      pane.appendChild(this._pv);
+    }
     this._form = this._makeForm((value) => this._emit(value));
     pane.appendChild(this._form);
   }
@@ -1443,6 +1548,7 @@ class TrashCardPlusEditor extends HTMLElement {
       this._form.data = this._formData();
     }
     if (this._dp) this._renderDatePreview();
+    if (this._pv && this._tab === 'design' && !this._itemForm) this._renderDesignPreview();
     if (this._list) this._renderItemList();
     if (this._foundEl) this._renderFound();
     if (this._itemForm) {
@@ -1469,6 +1575,18 @@ class TrashCardPlusEditor extends HTMLElement {
       return `<span class="k">${esc(rows[i])}</span><span class="v">${esc(txt)}${cd ? (mode === 'badge' ? `<span class="b">${esc(cd)}</span>` : ` · ${esc(cd)}`) : ''}</span>`;
     }).join('');
     this._dp.innerHTML = `<span class="h">${esc(this._t('preview'))}</span>${html}`;
+  }
+
+  // Vorschau im Tab „Design“: umgebende Karte + Beispiel-Einträge
+  _renderDesignPreview() {
+    const cfg = { ...this._config, max_items: 0 };
+    const layout = cfg.layout || DEFAULTS.layout;
+    const entries = demoEntries(cfg).slice(0, layout === 'chips' || layout === 'icons' ? 4 : 2);
+    let cols = Number(cfg.columns ?? DEFAULTS.columns);
+    if (layout === 'list' || layout === 'chips') cols = 1;
+    else cols = Math.max(1, Math.min(cols, entries.length || 1));
+    const inner = `<div class="items lay-${layout}" style="--tcp-cols:${cols}">${entries.map((e) => renderEntry(e, cfg, this._hass)).join('')}</div>`;
+    this._pv.innerHTML = `<div class="pv-label">${esc(this._t('preview'))}</div>${wrapHtml(cfg, inner)}`;
   }
 
   _renderItemPreview(item) {
@@ -1623,7 +1741,18 @@ class TrashCardPlusEditor extends HTMLElement {
     if (cfg.highlight_days !== undefined) cfg.highlight_days = Number(cfg.highlight_days);
     if (cfg.max_items === 0) delete cfg.max_items;
     if (cfg.date_format !== 'custom') ['df_weekday', 'df_day', 'df_month', 'df_year'].forEach((k) => delete cfg[k]);
-    if (cfg.container !== 'card') ['container_bg_mode', 'container_bg_color', 'container_bg_opacity', 'container_blur'].forEach((k) => delete cfg[k]);
+    // Innenabstand der Karte folgt dem Innenabstand der Einträge, solange er nicht eigens gesetzt wurde
+    if (cfg.card_padding !== undefined && this._config.card_padding === undefined && Number(cfg.card_padding) === Number(this._val('padding'))) delete cfg.card_padding;
+    // Abhängige Werte entfernen, wenn der zugehörige Modus sie nicht nutzt
+    if (cfg.card_bg_mode !== 'custom') delete cfg.card_bg_color;
+    if (!['tinted', 'accent', 'custom'].includes(cfg.card_bg_mode)) delete cfg.card_bg_gradient;
+    if (cfg.card_bg_mode === 'none') delete cfg.card_bg_opacity;
+    if (cfg.card_border_mode !== 'custom') delete cfg.card_border_color;
+    if (!['accent', 'custom'].includes(cfg.card_border_mode)) delete cfg.card_border_width;
+    if (cfg.container !== 'card') {
+      ['accent_color', 'card_bg_mode', 'card_bg_color', 'card_bg_opacity', 'card_bg_gradient', 'card_blur',
+        'card_border_mode', 'card_border_color', 'card_border_width', 'card_shadow', 'card_radius', 'card_padding'].forEach((k) => delete cfg[k]);
+    }
     this._config = cfg;
     this.dispatchEvent(new CustomEvent('config-changed', { detail: { config: cfg }, bubbles: true, composed: true }));
     this._refresh();

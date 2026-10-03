@@ -124,8 +124,8 @@ layout: list
 container: card
 title: Müllabfuhr
 title_icon: mdi:trash-can-outline
-container_bg_opacity: 40
-container_blur: 12
+card_bg_opacity: 40
+card_blur: 12
 bg_mode: none
 shadow: none
 date_format: weekday_long_date
@@ -202,10 +202,7 @@ Alles lässt sich im Editor einstellen – die Tabelle ist nur zum Nachschlagen.
 | `columns` | `2` | Spalten bei Kacheln/Symbolen |
 | `alignment` | `left` | `left`, `center`, `right`, `space` (Chips) |
 | `show_label` / `use_summary` | `true` / `false` | Bezeichnung zeigen / Kalendertitel statt Bezeichnung |
-| `container` | `none` | `none` (einzelne Einträge) oder `card` (eine gemeinsame Karte) |
 | `title`, `title_icon` | – | Titel der Karte |
-| `container_bg_mode` | `theme` | `theme`, `custom`, `none` |
-| `container_bg_color`, `container_bg_opacity`, `container_blur` | – / `100` / `0` | Farbe, Deckkraft (%), Unschärfe (px) |
 | `tap_action` | `more-info` | Beliebige HA-Aktion |
 
 ### Datum
@@ -222,6 +219,27 @@ Alles lässt sich im Editor einstellen – die Tabelle ist nur zum Nachschlagen.
 
 Diese Optionen gelten für alle Abfallarten und können in jedem Eintrag unter `items` überschrieben werden.
 Farben gehen als `[r, g, b]`, Hex-Code (`"#ff9800"`) oder HA-Farbname (`red`, `deep-purple` …).
+
+#### Umgebende Karte (einheitlich mit EV Charge Card, Power-Flow-Karte und Status-Übersicht)
+
+Im Editor unter **Design** ganz oben – gleiche Auswahlen, Bezeichnungen und YAML-Schlüssel
+wie in den anderen Karten, Design-YAML lässt sich also zwischen den Karten kopieren.
+
+| Option | Standard | Werte |
+|---|---|---|
+| `container` | `none` | `none` (einzelne Einträge) oder `card` (alle Einträge in einer Karte) |
+| `accent_color` | Theme-Akzent | Farbe für `tinted`, `accent` und den Akzent-Rahmen der Karte |
+| `card_bg_mode` | `theme` | `theme`, `tinted` (Theme + Farbton), `accent`, `custom`, `none` |
+| `card_bg_color`, `card_bg_opacity`, `card_bg_gradient` | – / `100` / `false` | Eigene Farbe, Deckkraft (%), Farbverlauf |
+| `card_blur` | `0` | Unschärfe hinter der Karte (px, Glas-Effekt) |
+| `card_border_mode` | `theme` | `theme`, `none`, `accent`, `custom` (+ `card_border_color`, `card_border_width`) |
+| `card_shadow` | `theme` | `theme`, `none`, `soft`, `strong` |
+| `card_radius`, `card_padding` | Theme / wie `padding` | Eckenradius und Innenabstand der Karte (px) |
+
+Die bisherigen Schlüssel `container_bg_mode`, `container_bg_color`, `container_bg_opacity`
+und `container_blur` funktionieren weiter und werden automatisch übernommen.
+
+#### Abfallarten
 
 | Option | Standard | Werte |
 |---|---|---|
